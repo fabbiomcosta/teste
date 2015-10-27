@@ -40,7 +40,7 @@ int main (int argc, char *argv[])
     char buf[MAXDATASIZE];
     struct addrinfo hints, *servinfo, *p;
     int rv;
-    char s[INET6_ADDRSTRLEN];
+    char s[INET6_ADDRSTRLEN], command;
 
     if (argc != 4)
     {
@@ -93,7 +93,9 @@ int main (int argc, char *argv[])
     buf[numbytes] = '\0';
 
     printf("%s\n",buf);
- 
+
+
+    // function to Ctrl+c
     void  INThandler(int sig) {
          char  c;
 
@@ -102,6 +104,7 @@ int main (int argc, char *argv[])
          c = getchar();
          if (c == 'y' || c == 'Y'){
               if (send(sockfd, argv[1], 30, 0) == -1) perror("send");
+              close(sockfd);  
               exit(0);
          }else
               signal(SIGINT, INThandler);
@@ -109,9 +112,35 @@ int main (int argc, char *argv[])
      }
     
     signal(SIGINT, INThandler);
-    while (1) pause();
 
-    close(sockfd);
+    // read command
+    while (1) {
+
+ 	scanf("%s", &command);
+        switch ( command )  {
+	    case 'SEND' :
+       	        printf ("SEND\n");
+     		break;
+ 
+     	    case 'SENDTO' :
+                printf ("SENDTO\n");
+                break;
+ 
+            case 'WHO' :
+                printf ("WHO\n");
+                break;
+ 
+            case 'HELP' :
+                printf ("HELP\n");
+                break;
+ 
+            default :
+                printf ("Invald value!\n Press Ctrl+c to exit");
+       }
+       getch(); 
+
+    }
+
 
     return 0;
 }
