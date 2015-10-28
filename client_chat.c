@@ -15,11 +15,14 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
-#include  <signal.h>
+#include <signal.h>
 #include "messages.h"
 
+//################### Constant Variable ##################
 #define MAXDATASIZE 2000 // max number of bytes we can get at once 
 
+
+//################### Function ##################
 
 // get sockaddr, IPv4 or IPv6:
 void *get_in_addr(struct sockaddr *sa)
@@ -32,7 +35,8 @@ void *get_in_addr(struct sockaddr *sa)
 }
 
 
-// Main Program
+//################### Main Program ####################
+
 int main (int argc, char *argv[])
 {
 
@@ -41,6 +45,7 @@ int main (int argc, char *argv[])
     struct addrinfo hints, *servinfo, *p;
     int rv;
     char s[INET6_ADDRSTRLEN], command;
+
 
     if (argc != 4)
     {
@@ -116,31 +121,37 @@ int main (int argc, char *argv[])
     // read command
     while (1) {
 
- 	scanf("%s", &command);
-        switch ( command )  {
-	    case 'SEND' :
-       	        printf ("SEND\n");
-     		break;
- 
-     	    case 'SENDTO' :
-                printf ("SENDTO\n");
-                break;
- 
-            case 'WHO' :
-                printf ("WHO\n");
-                break;
- 
-            case 'HELP' :
-                printf ("HELP\n");
-                break;
- 
-            default :
-                printf ("Invald value!\n Press Ctrl+c to exit");
-       }
-       getch(); 
+ 	    scanf("%s", &command);
+        if (strncmp(&command, "SEND", 4) == 0)
+        {
 
+            if (send(sockfd, &command, sizeof &command, 0) == -1) perror("send");
+            getchar();
+        } 
+        else if (strncmp(&command, "SENDTO", 6) == 0)
+        {
+            printf ("SENDTO\n");
+        }
+        else if (strncmp(&command, "WHO", 3) == 0)
+        {
+            printf ("WHO\n");
+        }
+        else if (strncmp(&command, "HELP", 4) == 0)
+        {
+            printf ("List of commands\n");
+            printf ("--------------------\n\n");
+            printf ("SEND - sends message to all users.\n");
+            printf ("SENDTO - sends message to a specific user.\n");
+            printf ("WHO - online users list.\n");
+            printf ("HELP - show all command.\n");
+	    getchar();
+        }
+        else
+        {
+            printf ("Invald value!\nPress Ctrl+c to exit\n");
+        }
     }
-
+    getchar(); 
 
     return 0;
 }
