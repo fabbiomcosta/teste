@@ -16,7 +16,6 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <signal.h>
-#include "messages.h"
 
 //################### Constant Variable ##################
 #define MAXDATASIZE 2000 // max number of bytes we can get at once 
