@@ -1,158 +1,316 @@
-/* client_chat.c
-
-  Fabio Costa <fabiomcosta@dcc.ufba.br>
-  Jundaí Abdon <jundai@dcc.ufba.br>
-
+/* 
+** Pragram : client_chat.c 
+** Students: Fabio Costa <fabiomcosta@dcc.ufba.br> and Jundaí Abdon <jundai@dcc.ufba.br>
+** Date: 30th November, 2015
+** Professor: Paul Pregnier
 */
-
+ 
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
-#include <errno.h>
 #include <string.h>
+#include <errno.h>
+ 
 #include <netdb.h>
-#include <sys/types.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
+#include <unistd.h>
+#include <pthread.h>
+ 
 #include <arpa/inet.h>
-#include <signal.h>
+#include <netinet/in.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+ 
+//################### Constant Variable ################## 
 
-//################### Constant Variable ##################
-#define MAXDATASIZE 2000 // max number of bytes we can get at once 
+#define BUFFSIZE 2000
+#define NAMELEN 32
+#define CMDLEN 16
+#define LINEBUFF 2048
 
+//################### Data structure ##################
 
-//################### Function ##################
+struct PACKET {
+    char command[CMDLEN]; // instruction
+    char name[NAMELEN]; // client's name
+    char buff[BUFFSIZE]; // message
+};
+ 
+struct USER {
+        int sockfd; // user's socket descriptor
+        char name[NAMELEN]; // user's name
+};
+ 
+struct THREADINFO {
+    pthread_t thread_ID; // thread's pointer
+    int sockfd; // socket file descriptor
+};
+ 
+//################### Grobal Variable ##################
+char server[] = "";
+int port;
+int isconnected, sockfd;
+char command[LINEBUFF];
+struct USER me;
 
-// get sockaddr, IPv4 or IPv6:
-void *get_in_addr(struct sockaddr *sa)
-{
-    if (sa->sa_family == AF_INET) {
-        return &(((struct sockaddr_in*)sa)->sin_addr);
-    }
+//################### Prototypes ##################
 
-    return &(((struct sockaddr_in6*)sa)->sin6_addr);
-}
+int connect_with_server();
+void setname(struct USER *me);
+void logout(struct USER *me);
+void login(struct USER *me);
+void *receiver(void *param);
+void sendtoall(struct USER *me, char *msg);
+void sendtoname(struct USER *me, char * target, char *msg);
+void showclients(struct USER *me);
 
+//################### Main program ##################
 
-//################### Main Program ####################
+int main(int argc, char **argv) {
+    int sockfd, namelen;
 
-int main (int argc, char *argv[])
-{
-
-    int sockfd, numbytes;  
-    char buf[MAXDATASIZE];
-    struct addrinfo hints, *servinfo, *p;
-    int rv;
-    char s[INET6_ADDRSTRLEN], command;
-
-
-    if (argc != 4)
-    {
+    if (argc != 4){
         printf ("\nUso: client_chat <CLIENT_NAME> <SERVER_ADDRESS> <SERVER_PORT>\n");
         return (1);
     }
 
-    memset(&hints, 0, sizeof hints);
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
 
-    if ((rv = getaddrinfo(argv[2], argv[3], &hints, &servinfo)) != 0) {
-        fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
-        return 1;
+    strcpy(server, argv[2]);
+    port = atoi(argv[3]);
+    memset(&me, 0, sizeof(struct USER));
+    strcpy(me.name, argv[1]);
+    login(&me);
+
+    while(gets(command)) {
+        if(!strncmp(command, "EXIT", 4)) {
+            logout(&me);
+            break;
+        }
+        if(!strncmp(command, "HELP", 4)) {
+            FILE *fin = fopen("help.txt", "r");
+            if(fin != NULL) {
+                while(fgets(command, LINEBUFF-1, fin)) puts(command);
+                fclose(fin);
+            }
+            else {
+                fprintf(stderr, "Help file not found...\n");
+            }
+        }
+        else if(!strncmp(command, "NAME", 4)) {
+            char *ptr = strtok(command, " ");
+            ptr = strtok(0, " ");
+            memset(me.name, 0, sizeof(char) * NAMELEN);
+            if(ptr != NULL) {
+                namelen =  strlen(ptr);
+                if(namelen > NAMELEN) ptr[NAMELEN] = 0;
+                strcpy(me.name, ptr);
+                setname(&me);
+            }
+        }
+        else if(!strncmp(command, "SENDTO", 6)) {
+            char *ptr = strtok(command, " ");
+            char temp[NAMELEN];
+            ptr = strtok(0, " ");
+            memset(temp, 0, sizeof(char) * NAMELEN);
+            if(ptr != NULL) {
+                namelen =  strlen(ptr);
+                if(namelen > NAMELEN) ptr[NAMELEN] = 0;
+                strcpy(temp, ptr);
+                while(*ptr) ptr++; ptr++;
+                while(*ptr <= ' ') ptr++;
+                sendtoname(&me, temp, ptr);
+            }
+        }
+        else if(!strncmp(command, "WHO", 3)) {
+            showclients(&me);
+        }
+        else if(!strncmp(command, "SEND", 4)) {
+            sendtoall(&me, &command[5]);
+        }
+        else fprintf(stderr, "Unknown command...\n");
     }
-
-    // loop through all the results and connect to the first we can
-    for(p = servinfo; p != NULL; p = p->ai_next) {
-        if ((sockfd = socket(p->ai_family, p->ai_socktype,
-                p->ai_protocol)) == -1) {
-            perror("client: socket");
-            continue;
-        }
-
-        if (connect(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
-            close(sockfd);
-            perror("client: connect");
-            continue;
-        }
-
-        break;
-    }
-
-    if (p == NULL) {
-        fprintf(stderr, "client: failed to connect\n");
-        return 2;
-    }
-
-    printf(MSG_CL_CONNECTED);
-
-    freeaddrinfo(servinfo); // all done with this structure
-
-    if (send(sockfd, argv[1], 30, 0) == -1) perror("send");
-
-    if ((numbytes = recv(sockfd, buf, MAXDATASIZE-1, 0)) == -1) {
-        perror("recv");
-        exit(1);
-    }
-
-    buf[numbytes] = '\0';
-
-    printf("%s\n",buf);
-
-
-    // function to Ctrl+c
-    void  INThandler(int sig) {
-         char  c;
-
-         signal(sig, SIG_IGN);
-         printf("\nDo you really want to quit? [y/n] ");
-         c = getchar();
-         if (c == 'y' || c == 'Y'){
-              if (send(sockfd, argv[1], 30, 0) == -1) perror("send");
-              close(sockfd);  
-              exit(0);
-         }else
-              signal(SIGINT, INThandler);
-         getchar(); // Get new line character
-     }
-    
-    signal(SIGINT, INThandler);
-
-    // read command
-    while (1) {
-
- 	    scanf("%s", &command);
-        if (strncmp(&command, "SEND", 4) == 0)
-        {
-
-            if (send(sockfd, &command, sizeof &command, 0) == -1) perror("send");
-            getchar();
-        } 
-        else if (strncmp(&command, "SENDTO", 6) == 0)
-        {
-            printf ("SENDTO\n");
-        }
-        else if (strncmp(&command, "WHO", 3) == 0)
-        {
-            printf ("WHO\n");
-        }
-        else if (strncmp(&command, "HELP", 4) == 0)
-        {
-            printf ("List of commands\n");
-            printf ("--------------------\n\n");
-            printf ("SEND - sends message to all users.\n");
-            printf ("SENDTO - sends message to a specific user.\n");
-            printf ("WHO - online users list.\n");
-            printf ("HELP - show all command.\n");
-	    getchar();
-        }
-        else
-        {
-            printf ("Invald value!\nPress Ctrl+c to exit\n");
-        }
-    }
-    getchar(); 
-
     return 0;
 }
 
+//################### Function #################
+
+void login(struct USER *me) {
+    int recvd;
+    sockfd = connect_with_server();
+    if(sockfd >= 0) {
+        isconnected = 1;
+        me->sockfd = sockfd;
+        struct THREADINFO threadinfo;
+        int sent;
+        struct PACKET packet;
     
+        memset(&packet, 0, sizeof(struct PACKET));
+        strcpy(packet.command, "LOGIN");
+        strcpy(packet.name, me->name);
+    
+               
+        /* send request to close this connetion */
+        sent = send(sockfd, (void *)&packet, sizeof(struct PACKET), 0);
+
+        pthread_create(&threadinfo.thread_ID, NULL, receiver, (void *)&threadinfo);
+ 
+    }
+    else {
+        fprintf(stderr, "Connection rejected...\n");
+    }
+}
+ 
+int connect_with_server() {
+    int newfd, err_ret;
+    struct sockaddr_in serv_addr;
+    struct hostent *to;
+ 
+    /* generate address */
+    if((to = gethostbyname(server))==NULL) {
+        err_ret = errno;
+        fprintf(stderr, "gethostbyname() error...\n");
+        return err_ret;
+    }
+ 
+    /* open a socket */
+    if((newfd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+        err_ret = errno;
+        fprintf(stderr, "socket() error...\n");
+        return err_ret;
+    }
+ 
+    /* set initial values */
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(port);
+    serv_addr.sin_addr = *((struct in_addr *)to->h_addr);
+    memset(&(serv_addr.sin_zero), 0, 8);
+ 
+    /* try to connect with server */
+    if(connect(newfd, (struct sockaddr *)&serv_addr, sizeof(struct sockaddr)) == -1) {
+        err_ret = errno;
+        fprintf(stderr, "connect() error...\n");
+        return err_ret;
+    }
+    else {
+        printf("Sucessfully Connected...\n");
+        return newfd;
+    }
+}
+ 
+void logout(struct USER *me) {
+    int sent;
+    struct PACKET packet;
+    
+    if(!isconnected) {
+        fprintf(stderr, "You are not connected...\n");
+        return;
+    }
+    
+    memset(&packet, 0, sizeof(struct PACKET));
+    strcpy(packet.command, "EXIT");
+    strcpy(packet.name, me->name);
+    
+    /* send request to close this connetion */
+    sent = send(sockfd, (void *)&packet, sizeof(struct PACKET), 0);
+    isconnected = 0;
+}
+
+void setname(struct USER *me) {
+    int sent;
+    struct PACKET packet;
+    
+    memset(&packet, 0, sizeof(struct PACKET));
+    strcpy(packet.command, "NAME");
+    strcpy(packet.name, me->name);
+    
+    /* send request to close this connetion */
+    sent = send(sockfd, (void *)&packet, sizeof(struct PACKET), 0);
+}
+ 
+void *receiver(void *param) {
+    int recvd;
+    struct PACKET packet;
+    
+    while(isconnected) {
+        
+        recvd = recv(sockfd, (void *)&packet, sizeof(struct PACKET), 0);
+        if(!strcmp(packet.command, "WHO")){
+            printf("List of clients: %s \n", packet.buff);
+        }else if (recvd > 0) {
+            printf("%s: %s\n", packet.name, packet.buff);
+        }else if (!recvd){
+            fprintf(stderr, "Connection lost from server...\n");
+            isconnected = 0;
+            close(sockfd);
+            break;
+        }else{
+            fprintf(stderr, "Receipt of message has failed...\n");
+            break;
+        }
+        memset(&packet, 0, sizeof(struct PACKET));
+    }
+    return NULL;
+}
+ 
+void sendtoall(struct USER *me, char *msg) {
+    int sent;
+    struct PACKET packet;
+    
+    if(!isconnected) {
+        fprintf(stderr, "You are not connected...\n");
+        return;
+    }
+    
+    msg[BUFFSIZE] = 0;
+    
+    memset(&packet, 0, sizeof(struct PACKET));
+    strcpy(packet.command, "SEND");
+    strcpy(packet.name, me->name);
+    strcpy(packet.buff, msg);
+    
+    /* send request to close this connetion */
+    sent = send(sockfd, (void *)&packet, sizeof(struct PACKET), 0);
+}
+ 
+void sendtoname(struct USER *me, char *target, char *msg) {
+    int sent, targetlen;
+    struct PACKET packet;
+    printf("Name: %s msg: %s", target, msg);
+    if(target == NULL) {
+        return;
+    }
+    
+    if(msg == NULL) {
+        return;
+    }
+    
+    if(!isconnected) {
+        fprintf(stderr, "You are not connected...\n");
+        return;
+    }
+    msg[BUFFSIZE] = 0;
+    targetlen = strlen(target);
+    
+    memset(&packet, 0, sizeof(struct PACKET));
+    strcpy(packet.command, "SENDTO");
+    strcpy(packet.name, me->name);
+    strcpy(packet.buff, target);
+    strcpy(&packet.buff[targetlen], " ");
+    strcpy(&packet.buff[targetlen+1], msg);
+    
+    /* send request to close this connetion */
+    sent = send(sockfd, (void *)&packet, sizeof(struct PACKET), 0);
+}
+
+void showclients(struct USER *me) {
+    int sent, targetlen;
+    struct PACKET packet;
+    
+    if(!isconnected) {
+        fprintf(stderr, "You are not connected...\n");
+        return;
+    }
+    
+    memset(&packet, 0, sizeof(struct PACKET));
+    strcpy(packet.command, "WHO");
+    strcpy(packet.name, me->name);
+    sent = send(sockfd, (void *)&packet, sizeof(struct PACKET), 0);
+}

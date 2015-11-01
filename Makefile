@@ -1,5 +1,5 @@
 all: server client
 server:
-	gcc -o server_chat server_chat.c
+	gcc server_chat.c -o server_chat -lpthread
 client:
-	gcc -o client_chat client_chat.c
+	gcc client_chat.c -o client_chat -lpthread
