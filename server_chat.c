@@ -1,34 +1,34 @@
-/* 
-** Pragram : server_chat.c 
+/*
+** Pragram : server_chat.c
 ** Students: Fabio Costa <fabiomcosta@dcc.ufba.br> and Jundaí Abdon <jundai@dcc.ufba.br>
 ** Date: 30th November, 2015
 ** Professor: Paul Pregnier
 */
- 
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
 #include <time.h>
- 
+
 #include <netdb.h>
 #include <unistd.h>
 #include <pthread.h>
- 
+
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 
-//################### Constant Variable ################## 
+//################### Constant Variable ##################
 
 #define BACKLOG 10
 #define CLIENTS 10
- 
+
 #define BUFFSIZE 2000
 #define NAMELEN 32
 #define CMDLEN 16
- 
+
 //################### Data structure ##################
 
 struct PACKET {
@@ -36,33 +36,38 @@ struct PACKET {
     char name[NAMELEN]; // client's name
     char buff[BUFFSIZE]; // payload
 };
- 
+
 struct THREADINFO {
     pthread_t thread_ID; // thread's pointer
     int sockfd; // socket file descriptor
     char name[NAMELEN]; // client's name
 };
- 
+
 struct LLNODE {
     struct THREADINFO threadinfo;
     struct LLNODE *next;
 };
- 
+
 struct LLIST {
     struct LLNODE *head, *tail;
     int size;
 };
 
+//################### Prototypes ##################
+
+
+
+//################### Function #################
 
 int compare(struct THREADINFO *a, struct THREADINFO *b) {
     return a->sockfd - b->sockfd;
 }
- 
+
 void list_init(struct LLIST *ll) {
     ll->head = ll->tail = NULL;
     ll->size = 0;
 }
- 
+
 int list_insert(struct LLIST *ll, struct THREADINFO *thr_info) {
     if(ll->size == CLIENTS) return -1;
     if(ll->head == NULL) {
@@ -80,7 +85,7 @@ int list_insert(struct LLIST *ll, struct THREADINFO *thr_info) {
     ll->size++;
     return 0;
 }
- 
+
 int list_delete(struct LLIST *ll, struct THREADINFO *thr_info) {
     struct LLNODE *curr, *temp;
     if(ll->head == NULL) return -1;
@@ -104,7 +109,7 @@ int list_delete(struct LLIST *ll, struct THREADINFO *thr_info) {
     }
     return -1;
 }
- 
+
 void list_dump(struct LLIST *ll) {
     struct LLNODE *curr;
     struct THREADINFO *thr_info;
@@ -116,7 +121,7 @@ void list_dump(struct LLIST *ll) {
 }
 
 // get current time
-char* printTime() {
+void printTime() {
     char hora[20];
     time_t t;
     time(&t);
@@ -124,34 +129,42 @@ char* printTime() {
     strftime (hora,80,"%R",localtime(&t));
     printf("%s\t", hora);
 }
- 
+
+
+
+//################### Grobal Variable ##################
+
 int sockfd, newfd, port;
 struct THREADINFO thread_info[CLIENTS];
 struct LLIST client_list;
 pthread_mutex_t clientlist_mutex;
- 
+
 void *io_handler(void *param);
 void *client_handler(void *fd);
- 
+
+//################### Main program ##################
+
+
 int main(int argc, char **argv) {
-    int err_ret, sin_size, rv, yes=1; // yes = allow use local addresses
+    int err_ret, sin_size, rv, fd[2], yes=1; // yes = allow use local addresses
     struct addrinfo hints, *servinfo, *p;
     struct sockaddr_storage client_addr;
     pthread_t interrupt;
- 
+    pid_t pid;
+
 
     if (argc != 2) {
         printf ("\nUso: server_chat <PORT>\n");
         return   (1);
     }
-    
+
     // convert string to int
     port = atoi(argv[1]);
 
 
     /* initialize linked list */
     list_init(&client_list);
- 
+
     /* initiate mutex */
     pthread_mutex_init(&clientlist_mutex, NULL);
 
@@ -166,7 +179,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
         return 1;
     }
- 
+
     // loop through all the results and bind to the first we can
     for(p = servinfo; p != NULL; p = p->ai_next) {
 
@@ -191,7 +204,7 @@ int main(int argc, char **argv) {
         break;
     }
 
-    freeaddrinfo(servinfo); // all done with this structure    
+    freeaddrinfo(servinfo); // all done with this structure
 
     if (p == NULL)  {
         fprintf(stderr, "server: failed to bind\n");
@@ -199,21 +212,37 @@ int main(int argc, char **argv) {
     }
 
 
- 
+
     /* start listening for connection */
     if(listen(sockfd, BACKLOG) == -1) {
         err_ret = errno;
         fprintf(stderr, "listen() failed...\n");
         return err_ret;
     }
- 
-    /* initiate interrupt handler for IO controlling */
+
+    if (pipe(fd)){
+      fprintf (stderr, "Pipe failed.\n");
+      return err_ret;
+    }
+
+
+    /* initiate interrupt handler for IO controlling (T1) */
+    /* lembrar do pid para ser usado com o pipe.
+    Duvida: como vou escrever dizer o file descriptor que essa thread vai usar? se fd[0] ou fd[1] e fazer o close corretamente? */
     if(pthread_create(&interrupt, NULL, io_handler, NULL) != 0) {
         err_ret = errno;
         fprintf(stderr, "pthread_create() failed...\n");
         return err_ret;
     }
- 
+
+    /* initiate interrupt handler for connections controlling (T2) */
+    //lembrar do pid para ser usado com o pipe
+    if(pthread_create(&interrupt, NULL, connections_handler, NULL) != 0){
+        err_ret = errno;
+        fprintf(stderr, "pthread_create() failed\n", );
+        return err_ret;
+    }
+
     /* keep accepting connections */
     while(1) {
         sin_size = sizeof(struct sockaddr_in);
@@ -229,17 +258,20 @@ int main(int argc, char **argv) {
             }
             struct THREADINFO threadinfo;
             threadinfo.sockfd = newfd;
-            strcpy(threadinfo.name, "Anonymous");
-            pthread_mutex_lock(&clientlist_mutex);
-            list_insert(&client_list, &threadinfo);
-            pthread_mutex_unlock(&clientlist_mutex);
-            pthread_create(&threadinfo.thread_ID, NULL, client_handler, (void *)&threadinfo);
+            //escrever os dados desse cara o pipe ou seja, enviar para T2
+            //strcpy(threadinfo.name, "Anonymous");
+            //ISSO deveria ser T2
+            //pthread_mutex_lock(&clientlist_mutex);
+            //list_insert(&client_list, &threadinfo);
+            //pthread_mutex_unlock(&clientlist_mutex);
+            //ISSO DEVERIA SER O FIM DE T2
+            //pthread_create(&threadinfo.thread_ID, NULL, client_handler, (void *)&threadinfo);
         }
     }
- 
+
     return 0;
 }
- 
+
 void *io_handler(void *param) {
     char command[CMDLEN];
     while(scanf("%s", command)==1) {
@@ -261,7 +293,28 @@ void *io_handler(void *param) {
     }
     return NULL;
 }
- 
+
+void *connections_handler(void *fd){
+    struct THREADINFO threadinfo = *(struct THREADINFO *)fd;
+    struct PACKET packet;
+    struct LLNODE *curr;
+    int received;
+
+    while (1) {
+      received = select(1, &fd, NULL, NULL, 0);
+      if(received == -1)
+        perror ("select()");
+      else if(received) {
+        pthread_mutex_lock(&clientlist_mutex);
+        list_insert(&client_list, &threadinfo);
+        pthread_mutex_unlock(&clientlist_mutex);
+        pthread_create(&threadinfo.thread_ID, NULL, client_handler, (void *)&threadinfo);
+      }
+
+    }
+
+}
+
 void *client_handler(void *fd) {
     struct THREADINFO threadinfo = *(struct THREADINFO *)fd;
     struct PACKET packet;
@@ -271,7 +324,7 @@ void *client_handler(void *fd) {
         bytes = recv(threadinfo.sockfd, (void *)&packet, sizeof(struct PACKET), 0);
         if(!bytes || !strcmp(packet.command, "EXIT")) {
             printTime();
-            printf(" %s \thas disconnected...\n", threadinfo.name);
+            printf("%s \thas disconnected...\n", threadinfo.name);
             pthread_mutex_lock(&clientlist_mutex);
             list_delete(&client_list, &threadinfo);
             pthread_mutex_unlock(&clientlist_mutex);
@@ -351,7 +404,7 @@ void *client_handler(void *fd) {
         else if(!strcmp(packet.command, "WHO")) {
             int skfd;
             struct PACKET spacket;
-            
+
             memset(&spacket, 0, sizeof(struct PACKET));
             strcpy(spacket.command, "WHO");
             strcpy(spacket.name, packet.name);
@@ -373,7 +426,7 @@ void *client_handler(void *fd) {
             if (sent == -1){
                 printTime();
                 printf("%s \t %s \t executed: No\n", packet.name,  packet.command);
-            } 
+            }
             printTime();
             printf("%s \t %s \t executed: Sim\n", packet.name,  packet.command);
             pthread_mutex_unlock(&clientlist_mutex);
@@ -382,9 +435,9 @@ void *client_handler(void *fd) {
             fprintf(stderr, "Please keep in touch with %s. He doesn't know how to use the client_chat!\n", threadinfo.name);
         }
     }
- 
+
     /* clean up */
     close(threadinfo.sockfd);
- 
+
     return NULL;
 }
