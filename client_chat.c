@@ -82,7 +82,6 @@ int main(int argc, char **argv) {
     while(isconnected) {
         gets(command);
         if(!strncmp(command, "EXIT", 4)) {
-            printf("bla");
             logout(&me);
             break;
         }
