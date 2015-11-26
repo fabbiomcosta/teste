@@ -55,7 +55,7 @@ struct LLIST {
 
 //################### Prototypes ##################
 
-
+void *connections_handler(void *fd);
 
 //################### Function #################
 
@@ -134,11 +134,10 @@ void printTime() {
 
 //################### Grobal Variable ##################
 
-int sockfd, newfd, port;
+int sockfd, newfd, port, fds[2];
 struct THREADINFO thread_info[CLIENTS];
 struct LLIST client_list;
 pthread_mutex_t clientlist_mutex;
-
 void *io_handler(void *param);
 void *client_handler(void *fd);
 
@@ -146,7 +145,7 @@ void *client_handler(void *fd);
 
 
 int main(int argc, char **argv) {
-    int err_ret, sin_size, rv, fds[2], yes=1; // yes = allow use local addresses
+    int err_ret, sin_size, rv, yes=1; // yes = allow use local addresses
     struct addrinfo hints, *servinfo, *p;
     struct sockaddr_storage client_addr;
     pthread_t interrupt;
@@ -218,15 +217,14 @@ int main(int argc, char **argv) {
         return err_ret;
     }
 
-    if (pipe(fd)){
+    if (pipe(fds)){
       fprintf (stderr, "Pipe failed.\n");
       return err_ret;
     }
 
 
     /* initiate interrupt handler for IO controlling (T1) */
-    /* Duvida: como vou escrever dizer o file descriptor que essa thread vai usar?
-     se fd[0] ou fd[1] e fazer o close corretamente? */
+    /* Duvida: como vou escrever dizer o file descriptor que essa thread vai usar? */
     if(pthread_create(&interrupt, NULL, io_handler, NULL) != 0) {
         err_ret = errno;
         fprintf(stderr, "pthread_create() failed...\n");
@@ -255,7 +253,7 @@ int main(int argc, char **argv) {
             }
             struct THREADINFO threadinfo;
             threadinfo.sockfd = newfd;
-            //Aqui devemos escrever no pipe para que o select receba o cliente FD_SET(1, &fds)?
+            //Aqui devemos escrever no pipe para que o select receba o cliente
             pthread_create(&threadinfo.thread_ID, NULL, client_handler, (void *)&threadinfo);
         }
     }
@@ -288,11 +286,13 @@ void *io_handler(void *param) {
 void *connections_handler(void *fd){
     struct THREADINFO threadinfo = *(struct THREADINFO *)fd;
     int received;
+    fd_set rfds;
 
-    FD_SET(0, &fds)
+    FD_ZERO(&rfds);
+    FD_SET(fds[0], &rfds);
 
     while (1) {
-      received = select(1, &fds, NULL, NULL, 0);
+      received = select(1, &rfds, NULL, NULL, 0);
       if(received == -1)
         perror ("select()");
       else if(received) {
