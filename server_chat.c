@@ -227,8 +227,8 @@ int main(int argc, char **argv) {
 
 
     /* initiate interrupt handler for IO controlling (T1) */
-    /* lembrar do pid para ser usado com o pipe.
-    Duvida: como vou escrever dizer o file descriptor que essa thread vai usar? se fd[0] ou fd[1] e fazer o close corretamente? */
+    /* Duvida: como vou escrever dizer o file descriptor que essa thread vai usar?
+     se fd[0] ou fd[1] e fazer o close corretamente? */
     if(pthread_create(&interrupt, NULL, io_handler, NULL) != 0) {
         err_ret = errno;
         fprintf(stderr, "pthread_create() failed...\n");
@@ -236,7 +236,6 @@ int main(int argc, char **argv) {
     }
 
     /* initiate interrupt handler for connections controlling (T2) */
-    //lembrar do pid para ser usado com o pipe
     if(pthread_create(&interrupt, NULL, connections_handler, NULL) != 0){
         err_ret = errno;
         fprintf(stderr, "pthread_create() failed\n", );
