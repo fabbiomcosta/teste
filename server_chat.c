@@ -1,7 +1,7 @@
 /*
 ** Pragram : server_chat.c
 ** Students: Fabio Costa <fabiomcosta@dcc.ufba.br> and Jundaí Abdon <jundai@dcc.ufba.br>
-** Date: 30th November, 2015
+** Date: 26th November, 2015
 ** Professor: Paul Pregnier
 */
 
@@ -55,12 +55,22 @@ struct LLIST {
 
 //################### Prototypes ##################
 
-void *connections_handler(void *fd);
+void *io_handler(void *param);
+void *connections_handler();
+void *client_handler();
+void *message_handler(void *fd);
 
 //################### Function #################
 
 int compare(struct THREADINFO *a, struct THREADINFO *b) {
     return a->sockfd - b->sockfd;
+}
+
+int compare_client(struct THREADINFO *a, struct THREADINFO *b) {
+    if(!strcmp(a->name, b->name)) { 
+        return 0;
+    }
+    return 1;
 }
 
 void list_init(struct LLIST *ll) {
@@ -133,22 +143,21 @@ void printTime() {
 
 
 //################### Grobal Variable ##################
-
+int err_ret, sin_size;
 int sockfd, newfd, port, fds[2];
 struct THREADINFO thread_info[CLIENTS];
 struct LLIST client_list;
 pthread_mutex_t clientlist_mutex;
-void *io_handler(void *param);
-void *client_handler(void *fd);
+struct sockaddr_storage client_addr;
+
 
 //################### Main program ##################
 
 
 int main(int argc, char **argv) {
-    int err_ret, sin_size, rv, yes=1; // yes = allow use local addresses
+    int rv, yes=1; // yes = allow use local addresses
     struct addrinfo hints, *servinfo, *p;
-    struct sockaddr_storage client_addr;
-    pthread_t interrupt;
+    pthread_t interrupt, T1, T2;
 
 
     if (argc != 2) {
@@ -224,41 +233,29 @@ int main(int argc, char **argv) {
 
 
     /* initiate interrupt handler for IO controlling (T1) */
-    /* Duvida: como vou escrever dizer o file descriptor que essa thread vai usar? */
     if(pthread_create(&interrupt, NULL, io_handler, NULL) != 0) {
         err_ret = errno;
         fprintf(stderr, "pthread_create() failed...\n");
         return err_ret;
     }
 
-    /* initiate interrupt handler for connections controlling (T2) */
-    if(pthread_create(&interrupt, NULL, connections_handler, NULL) != 0){
+    /* initiate T1 to handler connections */
+    if(pthread_create(&T1, NULL, connections_handler, NULL) != 0){
         err_ret = errno;
         fprintf(stderr, "pthread_create() failed\n");
         return err_ret;
     }
 
-    /* keep accepting connections */
-    while(1) {
-        sin_size = sizeof(struct sockaddr_in);
-        if((newfd = accept(sockfd, (struct sockaddr *)&client_addr, (socklen_t*)&sin_size)) == -1) {
-            err_ret = errno;
-            fprintf(stderr, "accept() failed...\n");
-            return err_ret;
-        }
-        else {
-            if(client_list.size == CLIENTS) {
-                fprintf(stderr, "Connection full, request rejected...\n");
-                continue;
-            }
-            struct THREADINFO threadinfo;
-            threadinfo.sockfd = newfd;
-            //Aqui devemos escrever no pipe para que o select receba o cliente,, usando a primitiva write()
-            pthread_create(&threadinfo.thread_ID, NULL, client_handler, (void *)&threadinfo);
-        }
+    /* initiate T2 to handler opened connections */
+    if(pthread_create(&T2, NULL, client_handler, NULL) != 0){
+        err_ret = errno;
+        fprintf(stderr, "pthread_create() failed\n");
+        return err_ret;
     }
 
-    return 0;
+    while(1){
+    }       
+   return 0;
 }
 
 void *io_handler(void *param) {
@@ -283,30 +280,53 @@ void *io_handler(void *param) {
     return NULL;
 }
 
-void *connections_handler(void *fd){
-    struct THREADINFO threadinfo = *(struct THREADINFO *)fd;
-    int received;
+void *connections_handler(){
 
-    //setting read from pipe for use in select()
-    fd_set rfds;
-    FD_ZERO(&rfds);
-    FD_SET(fds[0], &rfds);
-
-    while (1) {
-      received = select(1, &rfds, NULL, NULL, 0);
-      if(received == -1)
-        perror ("select()");
-      else if(received) {
-        pthread_mutex_lock(&clientlist_mutex);
-        list_insert(&client_list, &threadinfo);
-        pthread_mutex_unlock(&clientlist_mutex);
-      }
-
+    /* keep accepting connections */
+    while(1) {
+        sin_size = sizeof(struct sockaddr_in);
+        if((newfd = accept(sockfd, (struct sockaddr *)&client_addr, (socklen_t*)&sin_size)) == -1) {
+            err_ret = errno;
+            fprintf(stderr, "accept() failed...\n");
+        }
+        else {
+            if(client_list.size == CLIENTS) {
+                fprintf(stderr, "Connection full, request rejected...\n");
+                continue;
+            }
+            write (fds[1], &newfd,1);
+        }
     }
-
 }
 
-void *client_handler(void *fd) {
+void *client_handler() {
+
+    struct THREADINFO threadinfo;
+    fd_set set;
+    int newfd;
+    
+    /* Initialize the file descriptor set. */
+    FD_ZERO(&set);
+    FD_SET(fds[0], &set);
+
+    while(1){
+        int ret = select(FD_SETSIZE, &set, NULL, NULL, NULL);
+        if (ret < 0){
+           printf("error select");// error occurred
+	}
+	else
+	{
+           read (fds[0], &newfd,1);          
+           threadinfo.sockfd = newfd;
+           pthread_mutex_lock(&clientlist_mutex);
+           list_insert(&client_list, &threadinfo);
+           pthread_mutex_unlock(&clientlist_mutex);  
+           pthread_create(&threadinfo.thread_ID, NULL, message_handler, (void *)&threadinfo);
+    	}
+    }
+}
+
+void *message_handler(void *fd) {
     struct THREADINFO threadinfo = *(struct THREADINFO *)fd;
     struct PACKET packet;
     struct LLNODE *curr;
@@ -322,17 +342,32 @@ void *client_handler(void *fd) {
             break;
         }
         if(!strcmp(packet.command, "LOGIN")) {
-            printTime();
-            printf("%s \t has conected...\n", packet.name);
+ 
+            int skfd;
+            struct PACKET spacket;
+            
             pthread_mutex_lock(&clientlist_mutex);
+            strcpy(threadinfo.name, packet.name);
+            for(curr = client_list.head; curr != NULL; curr = curr->next) {
+                if(compare_client(&curr->threadinfo, &threadinfo) == 0) {
+                    memset(&spacket, 0, sizeof(struct PACKET));
+                    strcpy(spacket.command, "EXIT");
+                    strcpy(spacket.name, packet.name);
+                    skfd = threadinfo.sockfd;
+                    sent = send(skfd, (void *)&spacket, sizeof(struct PACKET), 0);           
+                    break;
+                }
+            }
             for(curr = client_list.head; curr != NULL; curr = curr->next) {
                 if(compare(&curr->threadinfo, &threadinfo) == 0) {
                     strcpy(curr->threadinfo.name, packet.name);
                     strcpy(threadinfo.name, packet.name);
                     break;
                 }
-            }
+            }              
             pthread_mutex_unlock(&clientlist_mutex);
+            printTime();
+            printf("%s \t has conected...\n", packet.name);
         }
         if(!strcmp(packet.command, "NAME")) {
             printTime();
@@ -423,7 +458,7 @@ void *client_handler(void *fd) {
             pthread_mutex_unlock(&clientlist_mutex);
         }
         else {
-            fprintf(stderr, "Please keep in touch with %s. He doesn't know how to use the client_chat!\n", threadinfo.name);
+//            fprintf(stderr, "Please keep in touch with %s. He doesn't know how to use the client_chat!\n", threadinfo.name);
         }
     }
 

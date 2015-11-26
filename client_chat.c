@@ -1,7 +1,7 @@
 /* 
 ** Pragram : client_chat.c 
 ** Students: Fabio Costa <fabiomcosta@dcc.ufba.br> and Jundaí Abdon <jundai@dcc.ufba.br>
-** Date: 30th November, 2015
+** Date: 2626 November, 2015
 ** Professor: Paul Pregnier
 */
  
@@ -79,8 +79,10 @@ int main(int argc, char **argv) {
     strcpy(me.name, argv[1]);
     login(&me);
 
-    while(gets(command)) {
+    while(isconnected) {
+        gets(command);
         if(!strncmp(command, "EXIT", 4)) {
+            printf("bla");
             logout(&me);
             break;
         }
@@ -211,6 +213,7 @@ void logout(struct USER *me) {
     /* send request to close this connetion */
     sent = send(sockfd, (void *)&packet, sizeof(struct PACKET), 0);
     isconnected = 0;
+    close(sockfd);
 }
 
 void setname(struct USER *me) {
@@ -230,9 +233,13 @@ void *receiver(void *param) {
     struct PACKET packet;
     
     while(isconnected) {
-        
         recvd = recv(sockfd, (void *)&packet, sizeof(struct PACKET), 0);
-        if(!strcmp(packet.command, "WHO")){
+        if(!strcmp(packet.command, "EXIT")){
+            printf("Client's name has been used... Try again!\n");
+            logout(&me);
+	    exit(0);
+            break; 
+        }else if(!strcmp(packet.command, "WHO")){
             printf("List of clients: %s \n", packet.buff);
         }else if (recvd > 0) {
             printf("%s: %s\n", packet.name, packet.buff);
@@ -273,7 +280,7 @@ void sendtoall(struct USER *me, char *msg) {
 void sendtoname(struct USER *me, char *target, char *msg) {
     int sent, targetlen;
     struct PACKET packet;
-    printf("Name: %s msg: %s", target, msg);
+
     if(target == NULL) {
         return;
     }

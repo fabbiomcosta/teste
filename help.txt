@@ -2,7 +2,6 @@ Comando         Argumentos                  Descrição
 ------------------------------------------------------
 SEND            <MESSAGE>                   Send <MESSAGE> to all conected clients.
 SENDTO          <CLIENT_NAME> <MESSAGE>     Send message only to specific client by <CLIENT_NAME>.
-NAME		<CLIENT_NAME>		    Change the client name.
 WHO              ---                        Show list of conected client on server.
 HELP             ---                        Show list of command.
 EXIT             ---                        Terminate the client program.
