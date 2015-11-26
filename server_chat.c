@@ -146,7 +146,7 @@ void *client_handler(void *fd);
 
 
 int main(int argc, char **argv) {
-    int err_ret, sin_size, rv, fd[2], yes=1; // yes = allow use local addresses
+    int err_ret, sin_size, rv, fds[2], yes=1; // yes = allow use local addresses
     struct addrinfo hints, *servinfo, *p;
     struct sockaddr_storage client_addr;
     pthread_t interrupt;
@@ -255,7 +255,7 @@ int main(int argc, char **argv) {
             }
             struct THREADINFO threadinfo;
             threadinfo.sockfd = newfd;
-            //Aqui devemos escrever no pipe para que o select receba o cliente
+            //Aqui devemos escrever no pipe para que o select receba o cliente FD_SET(1, &fds)?
             pthread_create(&threadinfo.thread_ID, NULL, client_handler, (void *)&threadinfo);
         }
     }
@@ -287,12 +287,12 @@ void *io_handler(void *param) {
 
 void *connections_handler(void *fd){
     struct THREADINFO threadinfo = *(struct THREADINFO *)fd;
-    struct PACKET packet;
-    struct LLNODE *curr;
     int received;
 
+    FD_SET(0, &fds)
+
     while (1) {
-      received = select(1, &fd, NULL, NULL, 0);
+      received = select(1, &fds, NULL, NULL, 0);
       if(received == -1)
         perror ("select()");
       else if(received) {
