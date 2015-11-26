@@ -253,7 +253,7 @@ int main(int argc, char **argv) {
             }
             struct THREADINFO threadinfo;
             threadinfo.sockfd = newfd;
-            //Aqui devemos escrever no pipe para que o select receba o cliente
+            //Aqui devemos escrever no pipe para que o select receba o cliente,, usando a primitiva write()
             pthread_create(&threadinfo.thread_ID, NULL, client_handler, (void *)&threadinfo);
         }
     }
@@ -286,8 +286,9 @@ void *io_handler(void *param) {
 void *connections_handler(void *fd){
     struct THREADINFO threadinfo = *(struct THREADINFO *)fd;
     int received;
-    fd_set rfds;
 
+    //setting read from pipe for use in select()
+    fd_set rfds;
     FD_ZERO(&rfds);
     FD_SET(fds[0], &rfds);
 
