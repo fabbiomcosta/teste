@@ -150,7 +150,6 @@ int main(int argc, char **argv) {
     struct addrinfo hints, *servinfo, *p;
     struct sockaddr_storage client_addr;
     pthread_t interrupt;
-    pid_t pid;
 
 
     if (argc != 2) {
@@ -212,7 +211,6 @@ int main(int argc, char **argv) {
     }
 
 
-
     /* start listening for connection */
     if(listen(sockfd, BACKLOG) == -1) {
         err_ret = errno;
@@ -238,7 +236,7 @@ int main(int argc, char **argv) {
     /* initiate interrupt handler for connections controlling (T2) */
     if(pthread_create(&interrupt, NULL, connections_handler, NULL) != 0){
         err_ret = errno;
-        fprintf(stderr, "pthread_create() failed\n", );
+        fprintf(stderr, "pthread_create() failed\n");
         return err_ret;
     }
 
@@ -257,14 +255,8 @@ int main(int argc, char **argv) {
             }
             struct THREADINFO threadinfo;
             threadinfo.sockfd = newfd;
-            //escrever os dados desse cara o pipe ou seja, enviar para T2
-            //strcpy(threadinfo.name, "Anonymous");
-            //ISSO deveria ser T2
-            //pthread_mutex_lock(&clientlist_mutex);
-            //list_insert(&client_list, &threadinfo);
-            //pthread_mutex_unlock(&clientlist_mutex);
-            //ISSO DEVERIA SER O FIM DE T2
-            //pthread_create(&threadinfo.thread_ID, NULL, client_handler, (void *)&threadinfo);
+            //Aqui devemos escrever no pipe para que o select receba o cliente
+            pthread_create(&threadinfo.thread_ID, NULL, client_handler, (void *)&threadinfo);
         }
     }
 
@@ -307,7 +299,6 @@ void *connections_handler(void *fd){
         pthread_mutex_lock(&clientlist_mutex);
         list_insert(&client_list, &threadinfo);
         pthread_mutex_unlock(&clientlist_mutex);
-        pthread_create(&threadinfo.thread_ID, NULL, client_handler, (void *)&threadinfo);
       }
 
     }
